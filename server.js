@@ -1,197 +1,229 @@
 const express = require("express");
 const fs = require("fs");
 const app = express();
-const PORT = process.env.PORT || 3000;
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-const DB_FILE = "./database.json";
+const PORT = process.env.PORT || 3000;
+
+// ===== DATABASE =====
+let db = { keys: [], users: [] };
+
+if (fs.existsSync("db.json")) {
+  db = JSON.parse(fs.readFileSync("db.json"));
+}
+
+function saveDB() {
+  fs.writeFileSync("db.json", JSON.stringify(db, null, 2));
+}
+
+// ===== LOGIN ADMIN =====
 const ADMIN_PASS = "120510";
 
-// ===== DB =====
-function loadDB() {
-  if (!fs.existsSync(DB_FILE)) return { keys: {} };
-  return JSON.parse(fs.readFileSync(DB_FILE));
-}
-function saveDB(db) {
-  fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2));
-}
-
-// ===== AUTH =====
-app.use((req, res, next) => {
-  if (req.path === "/login") return next();
-  if (req.path === "/api/check") return next();
-
-  const cookie = req.headers.cookie || "";
-  if (cookie.includes("auth=true")) return next();
-
-  res.redirect("/login");
-});
-
-// ===== LOGIN =====
-app.get("/login", (req, res) => {
-  res.send(`
-  <style>
-    body{background:#0f172a;color:white;font-family:sans-serif;display:flex;justify-content:center;align-items:center;height:100vh}
-    .box{background:#1e293b;padding:30px;border-radius:15px;width:300px;text-align:center}
-    input,button{width:100%;padding:10px;margin-top:10px;border-radius:10px;border:none}
-    button{background:#6366f1;color:white;font-weight:bold}
-  </style>
-  <div class="box">
-    <h2>🔐 ADMIN LOGIN</h2>
-    <form method="POST">
-      <input name="pass" placeholder="Mật khẩu">
-      <button>Đăng nhập</button>
-    </form>
-  </div>
-  `);
-});
-
 app.post("/login", (req, res) => {
-  if (req.body.pass === ADMIN_PASS) {
-    res.setHeader("Set-Cookie", "auth=true; Path=/");
-    res.redirect("/");
-  } else {
-    res.send("Sai mật khẩu");
+  if (req.body.password === ADMIN_PASS) {
+    return res.json({ ok: true });
   }
+  res.json({ ok: false });
 });
 
-// ===== API CHECK =====
-app.post("/api/check", (req, res) => {
-  let { key, deviceId } = req.body;
-  let db = loadDB();
+// ===== USER LOGIN =====
+app.post("/user/login", (req, res) => {
+  const { username } = req.body;
 
-  if (!db.keys[key]) return res.json({ ok: false });
-
-  let k = db.keys[key];
-
-  if (k.banned) return res.json({ ok: false, msg: "Banned" });
-
-  if (k.exp === "pending") {
-    k.exp = Date.now() + k.duration;
+  let user = db.users.find(u => u.username === username);
+  if (!user) {
+    user = { username, history: [] };
+    db.users.push(user);
   }
 
-  if (k.exp !== "permanent" && Date.now() > k.exp)
-    return res.json({ ok: false, msg: "Expired" });
+  saveDB();
+  res.json(user);
+});
 
-  if (!k.devices.includes(deviceId)) {
+// ===== CREATE KEY =====
+app.post("/create", (req, res) => {
+  const { key, days, maxDevices, vip } = req.body;
+
+  const newKey = {
+    key: key || Math.random().toString(36).substring(2, 10),
+    expire: Date.now() + (days || 1) * 86400000,
+    devices: [],
+    maxDevices: maxDevices || 1,
+    vip: vip || false,
+    banned: false,
+    active: true,
+    history: [],
+    ipList: []
+  };
+
+  db.keys.push(newKey);
+  saveDB();
+
+  res.json(newKey);
+});
+
+// ===== USE KEY =====
+app.post("/use-key", (req, res) => {
+  const { key, device, username } = req.body;
+  const k = db.keys.find(x => x.key === key);
+
+  if (!k) return res.json({ ok: false, msg: "Sai key" });
+  if (k.banned) return res.json({ ok: false, msg: "Key bị ban" });
+  if (!k.active) return res.json({ ok: false, msg: "Chưa kích hoạt" });
+  if (Date.now() > k.expire) return res.json({ ok: false, msg: "Hết hạn" });
+
+  // Anti share IP
+  if (!k.ipList.includes(req.ip)) {
+    if (k.ipList.length >= 3) {
+      k.banned = true;
+      return res.json({ ok: false, msg: "Nghi share key" });
+    }
+    k.ipList.push(req.ip);
+  }
+
+  // Device limit
+  if (!k.devices.includes(device)) {
     if (k.devices.length >= k.maxDevices)
-      return res.json({ ok: false, msg: "Full device" });
-    k.devices.push(deviceId);
+      return res.json({ ok: false, msg: "Quá thiết bị" });
+
+    k.devices.push(device);
   }
 
-  // lưu lịch sử
-  k.logs.push({
-    time: Date.now(),
-    device: deviceId,
-    ip: req.headers["x-forwarded-for"] || "unknown"
-  });
+  k.history.push({ device, time: Date.now(), username });
 
-  saveDB(db);
+  const user = db.users.find(u => u.username === username);
+  if (user) {
+    user.history.push({ key, time: Date.now() });
+  }
+
+  saveDB();
 
   res.json({ ok: true, vip: k.vip });
 });
 
-// ===== CREATE =====
-app.post("/create", (req, res) => {
-  let db = loadDB();
-
-  let key = req.body.custom || ("LVT-" + Math.random().toString(36).substr(2,6).toUpperCase());
-
-  let timeMap = {
-    sec:1000,min:60000,hour:3600000,day:86400000,month:2592000000,year:31536000000
-  };
-
-  let duration = req.body.type==="permanent"?0:parseInt(req.body.time)*timeMap[req.body.type];
-
-  db.keys[key] = {
-    exp: req.body.type==="permanent"?"permanent":"pending",
-    duration: duration,
-    maxDevices: parseInt(req.body.devices),
-    devices: [],
-    vip: req.body.vip==="true",
-    banned:false,
-    logs:[]
-  };
-
-  saveDB(db);
-  res.redirect("/");
+// ===== BAN / UNBAN =====
+app.post("/ban", (req, res) => {
+  const k = db.keys.find(x => x.key === req.body.key);
+  if (k) k.banned = true;
+  saveDB();
+  res.json({ ok: true });
 });
 
-// ===== ACTION =====
-app.get("/ban/:k",(req,res)=>{let db=loadDB();db.keys[req.params.k].banned=true;saveDB(db);res.redirect("/")});
-app.get("/unban/:k",(req,res)=>{let db=loadDB();db.keys[req.params.k].banned=false;saveDB(db);res.redirect("/")});
-app.get("/delete/:k",(req,res)=>{let db=loadDB();delete db.keys[req.params.k];saveDB(db);res.redirect("/")});
-app.get("/reset/:k",(req,res)=>{let db=loadDB();db.keys[req.params.k].devices=[];saveDB(db);res.redirect("/")});
-app.get("/addtime/:k",(req,res)=>{
-  let db=loadDB();
-  let k=db.keys[req.params.k];
-  if(k.exp!=="permanent"){
-    k.exp = (k.exp==="pending"?Date.now():k.exp)+86400000;
-  }
-  saveDB(db);res.redirect("/")
+app.post("/unban", (req, res) => {
+  const k = db.keys.find(x => x.key === req.body.key);
+  if (k) k.banned = false;
+  saveDB();
+  res.json({ ok: true });
+});
+
+// ===== DELETE =====
+app.post("/delete", (req, res) => {
+  db.keys = db.keys.filter(k => k.key !== req.body.key);
+  saveDB();
+  res.json({ ok: true });
+});
+
+// ===== EXPORT =====
+app.get("/export", (req, res) => {
+  res.send(db.keys.map(k => k.key).join("\n"));
+});
+
+// ===== STATS =====
+app.get("/stats", (req, res) => {
+  res.json({
+    totalKeys: db.keys.length,
+    totalUsers: db.users.length,
+    activeKeys: db.keys.filter(k => !k.banned).length
+  });
 });
 
 // ===== UI =====
 app.get("/", (req, res) => {
-  let db = loadDB();
-  let html="";
-
-  for(let k in db.keys){
-    let d=db.keys[k];
-    html+=`
-    <tr>
-      <td>${k}</td>
-      <td>${d.vip?"👑":"🔑"}</td>
-      <td>${d.devices.length}/${d.maxDevices}</td>
-      <td>${d.banned?"❌":"✅"}</td>
-      <td>
-        <a href="/ban/${k}">Ban</a> |
-        <a href="/unban/${k}">Unban</a> |
-        <a href="/reset/${k}">Reset</a> |
-        <a href="/delete/${k}">Xoá</a>
-      </td>
-    </tr>`;
-  }
-
   res.send(`
+  <html>
+  <head>
+  <title>KEY SYSTEM PRO</title>
   <style>
-    body{font-family:sans-serif;background:#0f172a;color:white;padding:20px}
-    input,select,button{padding:8px;margin:5px;border-radius:8px;border:none}
-    button{background:#22c55e;color:white}
-    table{width:100%;margin-top:20px;border-collapse:collapse}
-    td,th{border:1px solid #334155;padding:8px}
+    body { font-family: Arial; background:#111; color:#fff; text-align:center }
+    input,button { padding:10px; margin:5px; border-radius:8px; border:none }
+    .card { background:#222; padding:10px; margin:10px; border-radius:10px }
   </style>
+  </head>
 
-  <h2>🔥 KEY PANEL</h2>
+  <body>
+  <h1>🔥 KEY SYSTEM PRO MAX</h1>
 
-  <form method="POST" action="/create">
-    <input name="custom" placeholder="Key custom (bỏ trống = random)">
-    <input name="time" placeholder="Số">
-    <select name="type">
-      <option value="sec">Giây</option>
-      <option value="min">Phút</option>
-      <option value="hour">Giờ</option>
-      <option value="day">Ngày</option>
-      <option value="month">Tháng</option>
-      <option value="year">Năm</option>
-      <option value="permanent">Vĩnh viễn</option>
-    </select>
-    <input name="devices" placeholder="Thiết bị" value="1">
-    <select name="vip">
-      <option value="false">Thường</option>
-      <option value="true">VIP</option>
-    </select>
-    <button>Tạo Key</button>
-  </form>
+  <input id="pass" placeholder="Admin password">
+  <button onclick="login()">Login</button>
 
-  <table>
-    <tr><th>Key</th><th>Type</th><th>Devices</th><th>Status</th><th>Action</th></tr>
-    ${html}
-  </table>
+  <div id="admin" style="display:none">
+    <h2>Tạo key</h2>
+    <input id="key" placeholder="custom key">
+    <input id="days" placeholder="days">
+    <button onclick="create()">Create</button>
+
+    <h2>Danh sách key</h2>
+    <div id="list"></div>
+  </div>
+
+<script>
+let isLogin = false;
+
+function login(){
+  fetch("/login",{method:"POST",headers:{'Content-Type':'application/json'},
+  body:JSON.stringify({password:pass.value})})
+  .then(r=>r.json()).then(d=>{
+    if(d.ok){
+      admin.style.display="block";
+      load();
+    } else alert("Sai mk");
+  });
+}
+
+function create(){
+  fetch("/create",{method:"POST",headers:{'Content-Type':'application/json'},
+  body:JSON.stringify({
+    key:key.value,
+    days:parseInt(days.value)||1
+  })}).then(()=>load());
+}
+
+function ban(k){
+  fetch("/ban",{method:"POST",headers:{'Content-Type':'application/json'},
+  body:JSON.stringify({key:k})}).then(()=>load());
+}
+
+function del(k){
+  fetch("/delete",{method:"POST",headers:{'Content-Type':'application/json'},
+  body:JSON.stringify({key:k})}).then(()=>load());
+}
+
+function load(){
+  fetch("/stats").then(r=>r.json()).then(s=>{
+    document.title = "Keys: "+s.totalKeys;
+  });
+
+  fetch("/export").then(r=>r.text()).then(t=>{
+    const arr = t.split("\\n");
+
+    list.innerHTML = arr.map(k=>\`
+      <div class="card">
+        \${k}
+        <br>
+        <button onclick="ban('\${k}')">Ban</button>
+        <button onclick="del('\${k}')">Xóa</button>
+      </div>
+    \`).join("");
+  });
+}
+</script>
+
+  </body>
+  </html>
   `);
 });
 
-// ===== RUN =====
-app.listen(PORT, () => console.log("RUNNING " + PORT));
+// ===== START =====
+app.listen(PORT, () => console.log("Server running " + PORT));
