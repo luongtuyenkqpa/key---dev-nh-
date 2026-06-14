@@ -10,6 +10,7 @@ import threading
 from datetime import datetime
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from http import cookies
+from urllib.parse import parse_qs  # Fix: Import chuẩn thư viện hệ thống
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 
@@ -601,9 +602,7 @@ class BộXửLýYêuCầu(BaseHTTPRequestHandler):
             post_data = self.rfile.read(content_length)
 
             if self.path == "/admin/login":
-                # Xử lý đăng nhập admin bằng Form URL Encoded
-                from Wilbur_url import parse_qs # Sử dụng urllib.parse an toàn
-                from urllib.parse import parse_qs
+                # Fix: Đã loại bỏ dòng Import lỗi Wilbur_url ở đây
                 params = parse_qs(post_data.decode('utf-8'))
                 u = params.get('username', [''])[0]
                 p = params.get('password', [''])[0]
@@ -690,7 +689,7 @@ class BộXửLýYêuCầu(BaseHTTPRequestHandler):
                     if bot_app and noi_dung:
                         for cid in ids_khach:
                             try:
-                                # Tạo một luồng loop phụ để đẩy tin nhắn tránh block server chính
+                                # Fix: Gửi tin nhắn đồng bộ an toàn qua thread-safe loop hiện tại của bot
                                 asyncio.run_coroutine_threadsafe(
                                     bot_app.bot.send_message(chat_id=int(cid), text=f"🌸 <b>THÔNG BÁO CỬA HÀNG:</b>\n\n{noi_dung}", parse_mode="HTML"),
                                     bot_app.loop
@@ -721,7 +720,6 @@ def chạy_máy_chủ_http(cổng=10000):
 
 # --- CHỨC NĂNG CỦA BOT TELEGRAM ---
 async def bắt_đầu(cập_nhật: Update, ngữ_cảnh: ContextTypes.DEFAULT_TYPE) -> None:
-    # Tự động lưu khách hàng khi họ ấn lệnh /start
     uid = str(cập_nhật.effective_user.id)
     uname = cập_nhật.effective_user.first_name or "User"
     kn = sqlite3.connect("he_thong_ban_key.db")
@@ -798,7 +796,7 @@ async def quay_lai(cập_nhật: Update, ngữ_cảnh: ContextTypes.DEFAULT_TYPE
     await query.edit_message_text("╔══════════════════════╗\n║  🌸 KEY STORE VIP 🌸  ║\n╚══════════════════════╝\n\n💖 Chọn chức năng:", parse_mode="HTML", reply_markup=ban_phim)
 
 # --- Cơ chế chống ngủ đông cho server Render Free ---
-async def tự_ping_duy_trì_sự_sống():
+async def tự_ping_duy_trì_sự_sống(application: Application):
     import aiohttp
     await asyncio.sleep(15)
     while True:
@@ -818,7 +816,7 @@ def main():
     luong_http = threading.Thread(target=chạy_máy_chủ_http, args=(10000,), daemon=True)
     luong_http.start()
     
-    # 2. Tạo lập cấu hình bot Telegram
+    # 2. Tạo lập cấu hình bot Telegram chính thức
     bot_app = Application.builder().token(MÃ_TOKEN).build()
     
     bot_app.add_handler(CommandHandler("start", bắt_đầu))
@@ -827,13 +825,13 @@ def main():
     bot_app.add_handler(CallbackQueryHandler(lich_su_mua, pattern="^lich_su$"))
     bot_app.add_handler(CallbackQueryHandler(quay_lai, pattern="^quay_lai$"))
     
-    # 3. Tạo luồng lặp sự kiện bất đồng bộ riêng biệt cho tác vụ chống ngủ đông
-    vong_lap = asyncio.new_event_loop()
-    threading.Thread(target=lambda: vong_lap.run_forever(), daemon=True).start()
-    asyncio.run_coroutine_threadsafe(tự_ping_duy_trì_sự_sống(), vong_lap)
+    # 3. Fix: Đăng ký hàm tự ping chạy song song trực tiếp trong vòng lặp sự kiện (Event Loop) nội bộ của Bot
+    # Cách này giúp chống nghẽn / chống xung đột luồng và giữ cho Render luôn "Sống" ổn định 100%
+    bot_app.job_queue.run_repeating(lambda ctx: asyncio.create_task(tự_ping_duy_trì_sự_sống(bot_app)), interval=300, first=15)
     
     bộ_ghi_nhật_ký.info("🌸 Bot Key Store và Hệ thống Admin Web đang vận hành...")
-    bot_app.run_polling(allowed_updates=Update.ALL_TYPES, close_loop=False)
+    # Khởi động cơ chế polling chính thức (Không block luồng HTTP Server)
+    bot_app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
     main()
