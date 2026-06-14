@@ -282,7 +282,6 @@ TRANG_BẢNG_ĐIỀU_KHIỂN_ADMIN = f"""
     </div>
 
     <script>
-        // Tạo hiệu ứng hạt lấp lánh nền
         for (let i = 0; i < 40; i++) {{
             let s = document.createElement('div'); s.className = 'sparkle';
             s.style.left = Math.random() * 100 + '%'; s.style.animationDelay = Math.random() * 3 + 's';
@@ -298,8 +297,6 @@ TRANG_BẢNG_ĐIỀU_KHIỂN_ADMIN = f"""
         async function taiThongTin() {{
             const res = await fetch('/api/admin/products');
             const data = await res.json();
-            
-            // Đổ dữ liệu vào bảng và select box
             let tbody = '', options = '';
             data.forEach(sp => {{
                 tbody += `<tr><td>${{sp.id}}</td><td><b>${{sp.ten}}</b></td><td>${{sp.gia.toLocaleString()}}đ</td><td>${{sp.so_luong}} cái</td></tr>`;
@@ -347,7 +344,6 @@ TRANG_BẢNG_ĐIỀU_KHIỂN_ADMIN = f"""
             if(data.success) e.target.reset();
         }};
 
-        // Chạy khi tải trang
         taiThongTin();
     </script>
 </body>
@@ -491,15 +487,13 @@ TRANG_MINI_APP = TRANG_MINI_APP_GỐC if 'TRANG_MINI_APP_GỐC' in globals() els
 class BộXửLýYêuCầu(BaseHTTPRequestHandler):
     
     def kiem_tra_ddos(self):
-        """Cơ chế Anti-DDoS đơn giản: chặn IP nếu request quá nhanh"""
         ip_khach = self.client_address[0]
         thoi_gian_hien_tai = time.time()
         if ip_khach in LỊCH_SỬ_REQUEST:
             lich_su = LỊCH_SỬ_REQUEST[ip_khach]
-            # Loại bỏ các mốc thời gian cũ hơn 1 giây
             lich_su = [t for t in lich_su if thoi_gian_hien_tai - t < 1.0]
             LỊCH_SỬ_REQUEST[ip_khach] = lich_su
-            if len(lich_su) > 5: # Tối đa 5 request trong 1 giây từ 1 IP
+            if len(lich_su) > 5:
                 return False
         else:
             LỊCH_SỬ_REQUEST[ip_khach] = []
@@ -507,7 +501,6 @@ class BộXửLýYêuCầu(BaseHTTPRequestHandler):
         return True
 
     def xac_thuc_admin(self):
-        """Kiểm tra Cookie Session của Admin còn hạn không"""
         cookies_header = self.headers.get('Cookie')
         if cookies_header:
             ck = cookies.SimpleCookie(cookies_header)
@@ -518,12 +511,8 @@ class BộXửLýYêuCầu(BaseHTTPRequestHandler):
         return False
 
     def do_GET(self):
-        # Kiểm tra Anti DDoS chống treo server
         if not self.kiem_tra_ddos():
-            self.send_response(429)
-            self.end_headers()
-            self.wfile.write("Too Many Requests! Anti-DDoS protection.".encode('utf-8'))
-            return
+            self.send_response(429); self.end_headers(); return
 
         try:
             if self.path in ["/", "/app"]:
@@ -539,7 +528,6 @@ class BộXửLýYêuCầu(BaseHTTPRequestHandler):
                 self.wfile.write("OK".encode("utf-8"))
                 
             elif self.path == "/api/products":
-                # Lấy danh sách sản phẩm hiển thị trên web app công khai
                 ket_noi = sqlite3.connect("he_thong_ban_key.db")
                 con_tro = ket_noi.cursor()
                 con_tro.execute("SELECT id, ten, mo_ta, gia, so_luong FROM san_pham")
@@ -551,16 +539,13 @@ class BộXửLýYêuCầu(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps(sp_list).encode('utf-8'))
 
             elif self.path == "/admin":
-                # Trang quản trị admin
                 if self.xac_thuc_admin():
                     self.send_response(200)
                     self.send_header("Content-type", "text/html; charset=utf-8")
                     self.end_headers()
                     self.wfile.write(TRANG_BẢNG_ĐIỀU_KHIỂN_ADMIN.encode("utf-8"))
                 else:
-                    self.send_response(302)
-                    self.send_header("Location", "/admin/login")
-                    self.end_headers()
+                    self.send_response(302); self.send_header("Location", "/admin/login"); self.end_headers()
 
             elif self.path == "/admin/login":
                 self.send_response(200)
@@ -587,8 +572,7 @@ class BộXửLýYêuCầu(BaseHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(json.dumps(data).encode('utf-8'))
             else:
-                self.send_response(404)
-                self.end_headers()
+                self.send_response(404); self.end_headers()
         except Exception as e:
             bộ_ghi_nhật_ký.error(f"Lỗi hệ thống luồng GET: {e}")
             self.send_response(500); self.end_headers()
@@ -608,7 +592,7 @@ class BộXửLýYêuCầu(BaseHTTPRequestHandler):
 
                 if u == ADMIN_USER and p == ADMIN_PASS:
                     sid = str(uuid.uuid4())
-                    phiên_đăng_nhập[sid] = time.time() + 3600 # Phiên hoạt động 1 tiếng
+                    phiên_đăng_nhập[sid] = time.time() + 3600
                     self.send_response(302)
                     self.send_header("Set-Cookie", f"session_id={sid}; Path=/; HttpOnly")
                     self.send_header("Location", "/admin")
@@ -621,13 +605,11 @@ class BộXửLýYêuCầu(BaseHTTPRequestHandler):
                     self.wfile.write(TRANG_ĐĂNG_NHẬP_ADMIN.replace("{error_placeholder}", err_msg).encode("utf-8"))
 
             elif self.path == "/buy":
-                # Endpoint API mua hàng từ Client Mini App
                 data = json.loads(post_data.decode('utf-8'))
                 san_pham_id = data.get('product_id')
                 nguoi_dung_id = str(data.get('user_id', 'guest'))
                 ten_nguoi_dung = data.get('user_name', 'Khách')
                 
-                # Lưu thông tin khách hàng vào danh sách thông báo sau này
                 if nguoi_dung_id != 'guest':
                     kn = sqlite3.connect("he_thong_ban_key.db")
                     kn.execute("INSERT OR REPLACE INTO khach_hang (nguoi_dung_id, ten_nguoi_dung) VALUES (?, ?)", (nguoi_dung_id, ten_nguoi_dung))
@@ -654,7 +636,6 @@ class BộXửLýYêuCầu(BaseHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(json.dumps(phan_hoi).encode("utf-8"))
 
-            # --- CÁC ENDPOINT API THAO TÁC TRONG ADMIN (YÊU CẦU ĐĂNG NHẬP) ---
             elif self.path in ["/api/admin/update_price", "/api/admin/add_key", "/api/admin/send_notification"]:
                 if not self.xac_thuc_admin():
                     self.send_response(401); self.end_headers(); return
@@ -683,12 +664,10 @@ class BộXửLýYêuCầu(BaseHTTPRequestHandler):
                     con_tro.execute("SELECT nguoi_dung_id FROM khach_hang")
                     ids_khach = [r[0] for r in con_tro.fetchall()]
                     
-                    # Gọi tác vụ gửi tin nhắn bất đồng bộ qua bot telegram
                     thành_công = 0
                     if bot_app and noi_dung:
                         for cid in ids_khach:
                             try:
-                                # Gửi tin nhắn đồng bộ an toàn qua thread-safe loop hiện tại của bot
                                 asyncio.run_coroutine_threadsafe(
                                     bot_app.bot.send_message(chat_id=int(cid), text=f"🌸 <b>THÔNG BÁO CỬA HÀNG:</b>\n\n{noi_dung}", parse_mode="HTML"),
                                     bot_app.loop
@@ -710,7 +689,7 @@ class BộXửLýYêuCầu(BaseHTTPRequestHandler):
             self.send_response(500); self.end_headers()
 
     def log_message(self, format, *args):
-        pass # Vô hiệu hóa ghi log màn hình liên tục để tiết kiệm tài nguyên CPU cho Render
+        pass
 
 def chạy_máy_chủ_http(cổng=10000):
     may_chu = HTTPServer(('0.0.0.0', cổng), BộXửLýYêuCầu)
@@ -806,20 +785,17 @@ async def tự_ping_duy_trì_sự_sống(app: Application):
                         bộ_ghi_nhật_ký.info("Chống ngủ đông Render: Đã kích hoạt mạch đập thành công.")
         except Exception as e:
             bộ_ghi_nhật_ký.error(f"Lỗi mạch duy trì sự sống: {e}")
-        await asyncio.sleep(300) # Chu kỳ 5 phút một lần
+        await asyncio.sleep(300)
 
-# --- Hàm kích hoạt ping ngầm khi khởi động Bot ---
 async def khoi_tao_kem_ping(application: Application) -> None:
     asyncio.create_task(tự_ping_duy_trì_sự_sống(application))
 
 # --- Hàm chính điều phối hệ thống ---
 def main():
     global bot_app
-    # 1. Chạy HTTP Server trong một luồng riêng biệt độc lập hoàn toàn
     luong_http = threading.Thread(target=chạy_máy_chủ_http, args=(10000,), daemon=True)
     luong_http.start()
     
-    # 2. Tạo lập cấu hình bot Telegram chính thức với post_init để chạy ngầm tiến trình ping
     bot_app = Application.builder().token(MÃ_TOKEN).post_init(khoi_tao_kem_ping).build()
     
     bot_app.add_handler(CommandHandler("start", bắt_đầu))
@@ -829,7 +805,6 @@ def main():
     bot_app.add_handler(CallbackQueryHandler(quay_lai, pattern="^quay_lai$"))
     
     bộ_ghi_nhật_ký.info("🌸 Bot Key Store và Hệ thống Admin Web đang vận hành...")
-    # Khởi động cơ chế polling chính thức (Không block luồng HTTP Server)
     bot_app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
