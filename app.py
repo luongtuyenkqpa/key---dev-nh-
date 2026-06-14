@@ -796,7 +796,7 @@ async def quay_lai(cập_nhật: Update, ngữ_cảnh: ContextTypes.DEFAULT_TYPE
     await query.edit_message_text("╔══════════════════════╗\n║  🌸 KEY STORE VIP 🌸  ║\n╚══════════════════════╝\n\n💖 Chọn chức năng:", parse_mode="HTML", reply_markup=ban_phim)
 
 # --- Cơ chế chống ngủ đông cho server Render Free ---
-async def tự_ping_duy_trì_sự_sống(application: Application):
+async def tự_ping_duy_trì_sự_sống(app: Application):
     import aiohttp
     await asyncio.sleep(15)
     while True:
@@ -809,6 +809,10 @@ async def tự_ping_duy_trì_sự_sống(application: Application):
             bộ_ghi_nhật_ký.error(f"Lỗi mạch duy trì sự sống: {e}")
         await asyncio.sleep(300) # Chu kỳ 5 phút một lần
 
+# --- Hàm kích hoạt ping ngầm khi khởi động Bot ---
+async def khoi_tao_kem_ping(application: Application) -> None:
+    asyncio.create_task(tự_ping_duy_trì_sự_sống(application))
+
 # --- Hàm chính điều phối hệ thống ---
 def main():
     global bot_app
@@ -816,18 +820,14 @@ def main():
     luong_http = threading.Thread(target=chạy_máy_chủ_http, args=(10000,), daemon=True)
     luong_http.start()
     
-    # 2. Tạo lập cấu hình bot Telegram chính thức
-    bot_app = Application.builder().token(MÃ_TOKEN).build()
+    # 2. Tạo lập cấu hình bot Telegram chính thức với post_init để chạy ngầm tiến trình ping
+    bot_app = Application.builder().token(MÃ_TOKEN).post_init(khoi_tao_kem_ping).build()
     
     bot_app.add_handler(CommandHandler("start", bắt_đầu))
     bot_app.add_handler(CallbackQueryHandler(xem_san_pham, pattern="^xem_san_pham$"))
     bot_app.add_handler(CallbackQueryHandler(chon_san_pham, pattern="^chon_sp_"))
     bot_app.add_handler(CallbackQueryHandler(lich_su_mua, pattern="^lich_su$"))
     bot_app.add_handler(CallbackQueryHandler(quay_lai, pattern="^quay_lai$"))
-    
-    # 3. Fix: Đăng ký hàm tự ping chạy song song trực tiếp trong vòng lặp sự kiện (Event Loop) nội bộ của Bot
-    # Cách này giúp chống nghẽn / chống xung đột luồng và giữ cho Render luôn "Sống" ổn định 100%
-    bot_app.job_queue.run_repeating(lambda ctx: asyncio.create_task(tự_ping_duy_trì_sự_sống(bot_app)), interval=300, first=15)
     
     bộ_ghi_nhật_ký.info("🌸 Bot Key Store và Hệ thống Admin Web đang vận hành...")
     # Khởi động cơ chế polling chính thức (Không block luồng HTTP Server)
