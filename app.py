@@ -602,7 +602,6 @@ class BộXửLýYêuCầu(BaseHTTPRequestHandler):
             post_data = self.rfile.read(content_length)
 
             if self.path == "/admin/login":
-                # Fix: Đã loại bỏ dòng Import lỗi Wilbur_url ở đây
                 params = parse_qs(post_data.decode('utf-8'))
                 u = params.get('username', [''])[0]
                 p = params.get('password', [''])[0]
@@ -689,7 +688,7 @@ class BộXửLýYêuCầu(BaseHTTPRequestHandler):
                     if bot_app and noi_dung:
                         for cid in ids_khach:
                             try:
-                                # Fix: Gửi tin nhắn đồng bộ an toàn qua thread-safe loop hiện tại của bot
+                                # Gửi tin nhắn đồng bộ an toàn qua thread-safe loop hiện tại của bot
                                 asyncio.run_coroutine_threadsafe(
                                     bot_app.bot.send_message(chat_id=int(cid), text=f"🌸 <b>THÔNG BÁO CỬA HÀNG:</b>\n\n{noi_dung}", parse_mode="HTML"),
                                     bot_app.loop
